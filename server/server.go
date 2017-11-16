@@ -3,6 +3,7 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"github.com/hootsuite/atlantis/server/events"
 	"github.com/hootsuite/atlantis/server/events/locking"
 	"github.com/hootsuite/atlantis/server/events/locking/boltdb"
+	"github.com/hootsuite/atlantis/server/events/models"
 	"github.com/hootsuite/atlantis/server/events/run"
 	"github.com/hootsuite/atlantis/server/events/terraform"
 	"github.com/hootsuite/atlantis/server/events/vcs"
@@ -43,6 +45,10 @@ type Server struct {
 	EventsController   *EventsController
 	IndexTemplate      TemplateWriter
 	LockDetailTemplate TemplateWriter
+	Planner            *events.PlanExecutor
+	GHHostname         string
+	GHToken            string
+	GHUser             string
 }
 
 // Config configures Server.
@@ -200,6 +206,10 @@ func NewServer(config Config) (*Server, error) {
 		EventsController:   eventsController,
 		IndexTemplate:      indexTemplate,
 		LockDetailTemplate: lockTemplate,
+		Planner:            planExecutor,
+		GHHostname:         config.GithubHostname,
+		GHToken:            config.GithubToken,
+		GHUser:             config.GithubUser,
 	}, nil
 }
 
@@ -211,6 +221,9 @@ func (s *Server) Start() error {
 	s.Router.HandleFunc("/events", s.postEvents).Methods("POST")
 	s.Router.HandleFunc("/locks", s.DeleteLockRoute).Methods("DELETE").Queries("id", "{id:.*}")
 	lockRoute := s.Router.HandleFunc("/lock", s.GetLockRoute).Methods("GET").Queries("id", "{id}").Name(LockRouteName)
+
+	s.Router.HandleFunc("/plans", s.plan).Methods("POST")
+
 	// function that planExecutor can use to construct detail view url
 	// injecting this here because this is the earliest routes are created
 	s.CommandHandler.SetLockURL(func(lockID string) string {
@@ -227,6 +240,87 @@ func (s *Server) Start() error {
 	n.UseHandler(s.Router)
 	s.Logger.Warn("Atlantis started - listening on port %v", s.Port)
 	return cli.NewExitError(http.ListenAndServe(fmt.Sprintf(":%d", s.Port), n), 1)
+}
+
+type PlanRequestBody struct {
+	Repo      string
+	Path      string
+	Workspace string
+	Version   string
+}
+
+type PlanResponseBody struct {
+	Output   string
+	Success  bool
+	ExitCode int
+}
+
+func (s *Server) plan(w http.ResponseWriter, r *http.Request) {
+	// Deal with the request body.
+	d := json.NewDecoder(r.Body)
+	var body PlanRequestBody
+	err := d.Decode(&body)
+	if err != nil {
+		panic(err)
+	}
+	defer r.Body.Close()
+
+	// Set up Plan.
+	repoFullName := body.Repo
+	owner := strings.Split(repoFullName, "/")[0]
+	name := strings.Split(repoFullName, "/")[1]
+	cloneURL := fmt.Sprintf("https://%s:%s@%s/%s.git", s.GHUser, s.GHToken, s.GHHostname, repoFullName)
+	sanitizedCloneURL := fmt.Sprintf("https://%s/%s.git", s.GHHostname, repoFullName)
+
+	repo := models.Repo{
+		FullName:          repoFullName,
+		Owner:             owner,
+		Name:              name,
+		CloneURL:          cloneURL,
+		SanitizedCloneURL: sanitizedCloneURL,
+	}
+	pull := models.PullRequest{
+		Num:    3,
+		Branch: "master",
+	}
+	user := models.User{
+		Username: "git-atlantis-user",
+	}
+	cmd := &events.Command{
+		Name:        events.Plan,
+		Environment: body.Workspace,
+		Verbose:     true,
+		Flags:       []string{},
+	}
+	ctx := events.CommandContext{
+		BaseRepo: repo,
+		HeadRepo: repo,
+		Pull:     pull,
+		User:     user,
+		Command:  cmd,
+		Log:      s.Logger,
+	}
+	projects := []models.Project{
+		models.Project{
+			RepoFullName: repoFullName,
+			Path:         body.Path,
+		},
+	}
+
+	// Run plan and respond with result.
+	cr := s.Planner.RunPlan(&ctx, projects)
+	respBody, err := json.Marshal(PlanResponseBody{
+		Output:   cr.ProjectResults[0].PlanSuccess.TerraformOutput,
+		Success:  cr.ProjectResults[0].Status() == events.Success,
+		ExitCode: 0,
+	})
+	if err != nil {
+		panic("oh no!")
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	s.respond(w, logging.Info, http.StatusOK, "Plan executed")
+	w.Write(respBody)
 }
 
 func (s *Server) Index(w http.ResponseWriter, _ *http.Request) {

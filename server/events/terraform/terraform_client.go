@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"syscall"
 
 	"strings"
 
@@ -18,6 +19,7 @@ import (
 
 type Runner interface {
 	Version() *version.Version
+	RunCommandWithVersionCaptureExit(log *logging.SimpleLogger, path string, args []string, v *version.Version, env string) (int, string, error)
 	RunCommandWithVersion(log *logging.SimpleLogger, path string, args []string, v *version.Version, env string) (string, error)
 	RunInitAndEnv(log *logging.SimpleLogger, path string, env string, extraInitArgs []string, version *version.Version) ([]string, error)
 }
@@ -57,6 +59,50 @@ func NewClient() (*Client, error) {
 // Version returns the version of the terraform executable in our $PATH.
 func (c *Client) Version() *version.Version {
 	return c.defaultVersion
+}
+
+// RunCommandWithVersion executes the provided version of terraform with
+// the provided args in path. The variable "v" is the version of terraform executable to use and the variable "env" is the
+// environment specified by the user commenting "atlantis plan/apply {env}" which is set to "default" by default.
+func (c *Client) RunCommandWithVersionCaptureExit(log *logging.SimpleLogger, path string, args []string, v *version.Version, env string) (int, string, error) {
+	tfExecutable := "terraform"
+	// if version is the same as the default, don't need to prepend the version name to the executable
+	if !v.Equal(c.defaultVersion) {
+		tfExecutable = fmt.Sprintf("%s%s", tfExecutable, v.String())
+	}
+
+	// set environment variables
+	// this is to support scripts to use the ENVIRONMENT, ATLANTIS_TERRAFORM_VERSION
+	// and WORKSPACE variables in their scripts
+	// append current process's environment variables
+	// this is to prevent the $PATH variable being removed from the environment
+	envVars := []string{
+		fmt.Sprintf("ENVIRONMENT=%s", env),
+		fmt.Sprintf("ATLANTIS_TERRAFORM_VERSION=%s", v.String()),
+		fmt.Sprintf("WORKSPACE=%s", path),
+	}
+	envVars = append(envVars, os.Environ()...)
+
+	// append terraform executable name with args
+	tfCmd := fmt.Sprintf("%s %s", tfExecutable, strings.Join(args, " "))
+
+	terraformCmd := exec.Command("sh", "-c", tfCmd)
+	terraformCmd.Dir = path
+	terraformCmd.Env = envVars
+	out, err := terraformCmd.CombinedOutput()
+	commandStr := strings.Join(terraformCmd.Args, " ")
+	if err != nil {
+		if exiterr, ok := err.(*exec.ExitError); ok {
+			if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
+				return status.ExitStatus(), string(out), nil
+			}
+		}
+		err = fmt.Errorf("%s: running %q in %q: \n%s", err, commandStr, path, out)
+		log.Debug("error: %s", err)
+		return 1, string(out), err
+	}
+	log.Info("successfully ran %q in %q", commandStr, path)
+	return 0, string(out), nil
 }
 
 // RunCommandWithVersion executes the provided version of terraform with
