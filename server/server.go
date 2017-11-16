@@ -244,29 +244,30 @@ func (s *Server) Start() error {
 
 type PlanRequestBody struct {
 	Repo      string
+	Branch    string
 	Path      string
 	Workspace string
 	Version   string
 }
 
 type PlanResponseBody struct {
-	Output   string
-	Success  bool
-	ExitCode int
+	Output  string `json:"output"`
+	Success bool   `json:"success"`
+	Changes bool   `json:"changes"`
 }
 
 func (s *Server) plan(w http.ResponseWriter, r *http.Request) {
 	// Deal with the request body.
 	d := json.NewDecoder(r.Body)
-	var body PlanRequestBody
-	err := d.Decode(&body)
+	var reqBody PlanRequestBody
+	err := d.Decode(&reqBody)
 	if err != nil {
 		panic(err)
 	}
 	defer r.Body.Close()
 
 	// Set up Plan.
-	repoFullName := body.Repo
+	repoFullName := reqBody.Repo
 	owner := strings.Split(repoFullName, "/")[0]
 	name := strings.Split(repoFullName, "/")[1]
 	cloneURL := fmt.Sprintf("https://%s:%s@%s/%s.git", s.GHUser, s.GHToken, s.GHHostname, repoFullName)
@@ -279,16 +280,25 @@ func (s *Server) plan(w http.ResponseWriter, r *http.Request) {
 		CloneURL:          cloneURL,
 		SanitizedCloneURL: sanitizedCloneURL,
 	}
+	// Defaults.
+	branch := "master"
+	path := "."
+	if reqBody.Branch != "" {
+		branch = reqBody.Branch
+	}
+	if reqBody.Path != "" {
+		path = reqBody.Path
+	}
 	pull := models.PullRequest{
-		Num:    3,
-		Branch: "master",
+		Num:    0,
+		Branch: branch,
 	}
 	user := models.User{
 		Username: "git-atlantis-user",
 	}
 	cmd := &events.Command{
 		Name:        events.Plan,
-		Environment: body.Workspace,
+		Environment: reqBody.Workspace,
 		Verbose:     true,
 		Flags:       []string{},
 	}
@@ -303,23 +313,37 @@ func (s *Server) plan(w http.ResponseWriter, r *http.Request) {
 	projects := []models.Project{
 		models.Project{
 			RepoFullName: repoFullName,
-			Path:         body.Path,
+			Path:         path,
 		},
 	}
 
 	// Run plan and respond with result.
 	cr := s.Planner.RunPlan(&ctx, projects)
-	respBody, err := json.Marshal(PlanResponseBody{
-		Output:   cr.ProjectResults[0].PlanSuccess.TerraformOutput,
-		Success:  cr.ProjectResults[0].Status() == events.Success,
-		ExitCode: 0,
-	})
+	if len(cr.ProjectResults) == 0 {
+		s.respond(w, logging.Error, http.StatusInternalServerError, "No project results from plan")
+		return
+	}
+	res := cr.ProjectResults[0]
+	respStruct := PlanResponseBody{}
+	switch res.Status() {
+	case events.Success:
+		respStruct.Output = res.PlanSuccess.TerraformOutput
+		respStruct.Success = true
+		respStruct.Changes = res.PlanSuccess.Changes
+	case events.Failure:
+		respStruct.Output = res.Failure
+		respStruct.Success = false
+	case events.Error:
+		respStruct.Output = res.Error.Error()
+		respStruct.Success = false
+	}
+	respBody, err := json.Marshal(respStruct)
 	if err != nil {
-		panic("oh no!")
+		panic("oh no, can't json.Marshal(...)!")
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	s.respond(w, logging.Info, http.StatusOK, "Plan executed")
+	// s.respond(w, logging.Info, http.StatusOK, "Plan executed")
 	w.Write(respBody)
 }
 

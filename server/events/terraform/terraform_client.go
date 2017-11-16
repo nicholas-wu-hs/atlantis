@@ -91,16 +91,25 @@ func (c *Client) RunCommandWithVersionCaptureExit(log *logging.SimpleLogger, pat
 	terraformCmd.Env = envVars
 	out, err := terraformCmd.CombinedOutput()
 	commandStr := strings.Join(terraformCmd.Args, " ")
+	// 0 - Succeeded, diff is empty (no changes)
+	// 1 - Errored
+	// 2 - Succeeded, there is a diff
 	if err != nil {
 		if exiterr, ok := err.(*exec.ExitError); ok {
 			if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
-				return status.ExitStatus(), string(out), nil
+				switch ec := status.ExitStatus(); ec {
+				case 1:
+					err = fmt.Errorf("%s: running %q in %q: \n%s", err, commandStr, path, out)
+					log.Debug("error: %s", err)
+					return ec, string(out), err
+				case 2:
+					log.Info("successfully ran %q in %q", commandStr, path)
+					return ec, string(out), nil
+				}
 			}
 		}
-		err = fmt.Errorf("%s: running %q in %q: \n%s", err, commandStr, path, out)
-		log.Debug("error: %s", err)
-		return 1, string(out), err
 	}
+	// Otherwise exit code is 0.
 	log.Info("successfully ran %q in %q", commandStr, path)
 	return 0, string(out), nil
 }
