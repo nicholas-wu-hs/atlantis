@@ -326,16 +326,17 @@ func (s *Server) plan(w http.ResponseWriter, r *http.Request) {
 	res := cr.ProjectResults[0]
 	respStruct := PlanResponseBody{}
 	switch res.Status() {
-	case events.Success:
-		respStruct.Output = res.PlanSuccess.TerraformOutput
+	case vcs.Success:
 		respStruct.Success = true
+		respStruct.Output = res.PlanSuccess.TerraformOutput
 		respStruct.Changes = res.PlanSuccess.Changes
-	case events.Failure:
-		respStruct.Output = res.Failure
+	case vcs.Failed:
 		respStruct.Success = false
-	case events.Error:
-		respStruct.Output = res.Error.Error()
-		respStruct.Success = false
+		if err := res.Error; err != nil {
+			respStruct.Output = res.Error.Error()
+		} else {
+			respStruct.Output = res.Failure
+		}
 	}
 	respBody, err := json.Marshal(respStruct)
 	if err != nil {
