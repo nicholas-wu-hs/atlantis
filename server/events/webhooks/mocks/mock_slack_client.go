@@ -4,10 +4,9 @@
 package mocks
 
 import (
-	"reflect"
-
 	webhooks "github.com/hootsuite/atlantis/server/events/webhooks"
 	pegomock "github.com/petergtz/pegomock"
+	"reflect"
 )
 
 type MockSlackClient struct {
@@ -56,6 +55,18 @@ func (mock *MockSlackClient) ChannelExists(channelName string) (bool, error) {
 		}
 	}
 	return ret0, ret1
+}
+
+func (mock *MockSlackClient) JoinChannel(channel string) error {
+	params := []pegomock.Param{channel}
+	result := pegomock.GetGenericMockFrom(mock).Invoke("JoinChannel", params, []reflect.Type{reflect.TypeOf((*error)(nil)).Elem()})
+	var ret0 error
+	if len(result) != 0 {
+		if result[0] != nil {
+			ret0 = result[0].(error)
+		}
+	}
+	return ret0
 }
 
 func (mock *MockSlackClient) PostMessage(channel string, applyResult webhooks.ApplyResult) error {
@@ -139,6 +150,33 @@ func (c *SlackClient_ChannelExists_OngoingVerification) GetCapturedArguments() s
 }
 
 func (c *SlackClient_ChannelExists_OngoingVerification) GetAllCapturedArguments() (_param0 []string) {
+	params := pegomock.GetGenericMockFrom(c.mock).GetInvocationParams(c.methodInvocations)
+	if len(params) > 0 {
+		_param0 = make([]string, len(params[0]))
+		for u, param := range params[0] {
+			_param0[u] = param.(string)
+		}
+	}
+	return
+}
+
+func (verifier *VerifierSlackClient) JoinChannel(channel string) *SlackClient_JoinChannel_OngoingVerification {
+	params := []pegomock.Param{channel}
+	methodInvocations := pegomock.GetGenericMockFrom(verifier.mock).Verify(verifier.inOrderContext, verifier.invocationCountMatcher, "JoinChannel", params)
+	return &SlackClient_JoinChannel_OngoingVerification{mock: verifier.mock, methodInvocations: methodInvocations}
+}
+
+type SlackClient_JoinChannel_OngoingVerification struct {
+	mock              *MockSlackClient
+	methodInvocations []pegomock.MethodInvocation
+}
+
+func (c *SlackClient_JoinChannel_OngoingVerification) GetCapturedArguments() string {
+	channel := c.GetAllCapturedArguments()
+	return channel[len(channel)-1]
+}
+
+func (c *SlackClient_JoinChannel_OngoingVerification) GetAllCapturedArguments() (_param0 []string) {
 	params := pegomock.GetGenericMockFrom(c.mock).GetInvocationParams(c.methodInvocations)
 	if len(params) > 0 {
 		_param0 = make([]string, len(params[0]))

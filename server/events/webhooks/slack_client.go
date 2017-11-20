@@ -18,6 +18,7 @@ type SlackClient interface {
 	AuthTest() error
 	TokenIsSet() bool
 	ChannelExists(channelName string) (bool, error)
+	JoinChannel(channel string) error
 	PostMessage(channel string, applyResult ApplyResult) error
 }
 
@@ -28,6 +29,7 @@ type SlackClient interface {
 type UnderlyingSlackClient interface {
 	AuthTest() (response *slack.AuthTestResponse, error error)
 	GetChannels(excludeArchived bool) ([]slack.Channel, error)
+	JoinChannel(channel string) (*slack.Channel, error)
 	PostMessage(channel, text string, parameters slack.PostMessageParameters) (string, string, error)
 }
 
@@ -50,6 +52,11 @@ func (d *DefaultSlackClient) AuthTest() error {
 
 func (d *DefaultSlackClient) TokenIsSet() bool {
 	return d.Token != ""
+}
+
+func (d *DefaultSlackClient) JoinChannel(channel string) error {
+	_, err := d.Slack.JoinChannel(channel)
+	return err
 }
 
 func (d *DefaultSlackClient) ChannelExists(channelName string) (bool, error) {

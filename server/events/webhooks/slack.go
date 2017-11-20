@@ -29,6 +29,11 @@ func NewSlack(r *regexp.Regexp, channel string, client SlackClient) (*SlackWebho
 		return nil, errors.Errorf("slack channel %q doesn't exist", channel)
 	}
 
+	err = client.JoinChannel(channel)
+	if err != nil {
+		return nil, errors.Wrap(err, fmt.Sprintf("joining slack channel %q", channel))
+	}
+
 	return &SlackWebhook{
 		Client:         client,
 		WorkspaceRegex: r,

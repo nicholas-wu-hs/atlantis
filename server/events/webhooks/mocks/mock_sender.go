@@ -4,11 +4,10 @@
 package mocks
 
 import (
-	"reflect"
-
 	webhooks "github.com/hootsuite/atlantis/server/events/webhooks"
 	logging "github.com/hootsuite/atlantis/server/logging"
 	pegomock "github.com/petergtz/pegomock"
+	"reflect"
 )
 
 type MockSender struct {

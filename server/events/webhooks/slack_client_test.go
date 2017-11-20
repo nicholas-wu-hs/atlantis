@@ -45,6 +45,15 @@ func TestTokenIsSet(t *testing.T) {
 	Equals(t, true, c.TokenIsSet())
 }
 
+func TestJoinChannel_Error(t *testing.T) {
+	t.Log("When the underylying slack client errors, an error should be returned")
+	setup(t)
+	When(underlying.JoinChannel("privatechannel")).ThenReturn(nil, errors.New(""))
+
+	err := client.JoinChannel("privatechannel")
+	Assert(t, err != nil, "expected error")
+}
+
 func TestChannelExists_False(t *testing.T) {
 	t.Log("When the slack channel doesn't exist, function should return false")
 	setup(t)
